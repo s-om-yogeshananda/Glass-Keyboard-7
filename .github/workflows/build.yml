@@ -1,0 +1,60 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # প্রজেক্ট রেপোর রুটে থাকুক বা সাবফোল্ডারে — settings.gradle যেখানে আছে সেটাই খুঁজে নেয়
+      - name: Locate project
+        id: loc
+        run: |
+          f=$(find . -name settings.gradle -not -path "./.git/*" | head -n 1)
+          if [ -z "$f" ]; then
+            echo "settings.gradle পাওয়া যায়নি। রেপোতে ফাইলগুলো ঠিকমতো আপলোড হয়েছে কি না দেখুন।"
+            ls -R | head -50
+            exit 1
+          fi
+          d=$(dirname "$f")
+          echo "Project dir: $d"
+          echo "dir=$d" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: gradle assembleDebug --stacktrace
+
+      - name: Rename APK
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: cp app/build/outputs/apk/debug/app-debug.apk GlassKeyboard.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GlassKeyboard-APK
+          path: ${{ steps.loc.outputs.dir }}/GlassKeyboard.apk
+
+      - name: Publish APK to Releases
+        working-directory: ${{ steps.loc.outputs.dir }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest-build --yes --cleanup-tag || true
+          gh release create latest-build GlassKeyboard.apk --target "${{ github.sha }}" --title "Glass Keyboard (latest build)" --notes "Latest build. Download the APK and install it on your phone." --prerelease
